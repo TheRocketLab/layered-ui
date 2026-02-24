@@ -6,7 +6,7 @@ import './App.css'
 const testPopupPlacement = {
   top: '10%',
   left: '50%',
-  width: '35%',
+  width: '400px',
   height: '70%',
 }
 
