@@ -46,8 +46,6 @@ const fingerRegistry = [
 interface DualAirCursorProps {
   onSwipeDown?: () => void
   onSwipeUp?: () => void
-  verticalThreshold?: number
-  minFrames?: number
   cooldownMs?: number
   reverseBlockMs?: number
   minimumFingerSeparation?: number
@@ -57,8 +55,6 @@ interface DualAirCursorProps {
 export const DualAirCursor: React.FC<DualAirCursorProps> = ({
   onSwipeDown,
   onSwipeUp,
-  verticalThreshold = 0.15,
-  minFrames = 12,
   cooldownMs = 800,
   reverseBlockMs = 400,
   minimumFingerSeparation = 0.04,
@@ -70,12 +66,12 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
   const xTwoSpring = useSpring(0, { stiffness: 1000, damping: 50 })
   const yTwoSpring = useSpring(0, { stiffness: 1000, damping: 50 })
   const opacitySpring = useSpring(0, { stiffness: 200, damping: 50 })
-  const historyRef = useRef<number[]>([])
   const cooldownRef = useRef(false)
   const blockedDirectionRef = useRef<1 | -1 | null>(null)
   const blockUntilRef = useRef(0)
   const blockAllUntilRef = useRef(0)
   const [blockProgress, setBlockProgress] = useState(0)
+  const readyRef = useRef(false)
   const [fingerColors, setFingerColors] = useState({
     left: '#3b82f6',
     right: '#3b82f6',
@@ -85,6 +81,7 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
   const [jointLines, setJointLines] = useState<[{ x: number; y: number }, { x: number; y: number }][]>([])
   const [fingerStatus, setFingerStatus] = useState<{ name: string; straight: boolean }[]>([])
   const [activeCursors, setActiveCursors] = useState({ left: false, right: false })
+  const [lastEvent, setLastEvent] = useState<string>('')
 
   useEffect(() => {
     onSwipeDownRef.current = onSwipeDown
@@ -100,7 +97,7 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
       const landmarks = landmarksRef.current
       if (!landmarks || landmarks.length === 0) {
         opacitySpring.set(0)
-        historyRef.current = []
+        readyRef.current = false
         setActiveCursors({ left: false, right: false })
         setJointLines([])
         animationFrameId = requestAnimationFrame(loop)
@@ -125,11 +122,9 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
       yTwoSpring.set(targetTwoY)
       opacitySpring.set(1)
 
-      const averageY = (indexPoint.y + middlePoint.y) / 2
       const fingerDistance = Math.hypot(indexPoint.x - middlePoint.x, indexPoint.y - middlePoint.y)
       const hasTwoFingers = fingerDistance >= minimumFingerSeparation
       if (!hasTwoFingers) {
-        historyRef.current = []
         setFingerColors((prev) =>
           prev.left === '#3b82f6' && prev.right === '#3b82f6' ? prev : { left: '#3b82f6', right: '#3b82f6' },
         )
@@ -180,49 +175,44 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
       })
       setJointLines(joints)
 
-      if (!readyToSwipe) {
-        historyRef.current = []
-        animationFrameId = requestAnimationFrame(loop)
-        return
-      }
-
-      const history = historyRef.current
-      history.push(averageY)
-      if (history.length > minFrames) {
-        history.shift()
-      }
-
-      const now = performance.now()
-      const blockRemaining = blockAllUntilRef.current - now
-      if (blockRemaining > 0) {
-        const progress = Math.min(Math.max(blockRemaining / blockAfterSwipeMs, 0), 1)
-        setBlockProgress((prev) => (Math.abs(prev - progress) > 0.01 ? progress : prev))
-        animationFrameId = requestAnimationFrame(loop)
-        return
-      }
-      setBlockProgress((prev) => (prev > 0 ? 0 : prev))
-
-      if (!cooldownRef.current && history.length === minFrames) {
-        const delta = history[history.length - 1] - history[0]
-        if (Math.abs(delta) > verticalThreshold) {
-          const direction: 1 | -1 = delta > 0 ? 1 : -1
-          if (blockedDirectionRef.current === direction && blockUntilRef.current > now) {
-            // still blocked after a recent reverse swipe
-          } else {
-            if (delta > 0) {
-              onSwipeDownRef.current?.()
-            } else {
-              onSwipeUpRef.current?.()
+      const previousReady = readyRef.current
+      if (readyToSwipe !== previousReady) {
+        const now = performance.now()
+        const direction: 1 | -1 = readyToSwipe ? -1 : 1
+        const blockRemaining = blockAllUntilRef.current - now
+        if (blockRemaining > 0) {
+          const progress = Math.min(Math.max(blockRemaining / blockAfterSwipeMs, 0), 1)
+          setBlockProgress((prev) => (Math.abs(prev - progress) > 0.01 ? progress : prev))
+          readyRef.current = readyToSwipe
+        } else {
+          if (!cooldownRef.current) {
+            if (blockedDirectionRef.current !== direction || blockUntilRef.current <= now) {
+              if (direction === 1) {
+                onSwipeDownRef.current?.()
+                setLastEvent('Swipe Down')
+              } else {
+                onSwipeUpRef.current?.()
+                setLastEvent('Swipe Up')
+              }
             }
           }
           blockedDirectionRef.current = direction === 1 ? -1 : 1
           blockUntilRef.current = now + reverseBlockMs
           cooldownRef.current = true
-          historyRef.current = []
           window.setTimeout(() => {
             cooldownRef.current = false
           }, cooldownMs)
           blockAllUntilRef.current = now + blockAfterSwipeMs
+          setBlockProgress(1)
+          readyRef.current = readyToSwipe
+        }
+      } else {
+        const blockRemaining = blockAllUntilRef.current - performance.now()
+        if (blockRemaining > 0) {
+          const progress = Math.min(Math.max(blockRemaining / blockAfterSwipeMs, 0), 1)
+          setBlockProgress((prev) => (Math.abs(prev - progress) > 0.01 ? progress : prev))
+        } else {
+          setBlockProgress((prev) => (prev > 0 ? 0 : prev))
         }
       }
 
@@ -234,7 +224,7 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
     return () => {
       cancelAnimationFrame(animationFrameId)
     }
-  }, [cooldownMs, historyRef, isWebcamActive, landmarksRef, minFrames, opacitySpring, reverseBlockMs, verticalThreshold, xOneSpring, xTwoSpring, yOneSpring, yTwoSpring, blockAfterSwipeMs])
+  }, [cooldownMs, isWebcamActive, landmarksRef, opacitySpring, reverseBlockMs, xOneSpring, xTwoSpring, yOneSpring, yTwoSpring, blockAfterSwipeMs])
 
   if (!isWebcamActive) return null
 
@@ -332,6 +322,7 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
           }}
         >
           <span>Active casors: {(activeCursors.left ? 1 : 0) + (activeCursors.right ? 1 : 0)}</span>
+          <span>Last event: {lastEvent || '—'}</span>
           {fingerStatus.map((finger) => (
             <span key={finger.name}>
               {finger.name}: {finger.straight ? 'straight' : 'bent'}
