@@ -29,13 +29,16 @@
   "license": "MIT",
   "scripts": {
     "dev": "vite",
-    "build" : "npm run build:lib",
+    "build": "npm run build:lib",
     "build:lib": "tsc -b && vite build --config vite.lib.config.ts && tsc --project tsconfig.lib.json",
     "build:site": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "^0.10.32",
+    "@opendevsociety/kine-ui": "^1.1.0",
+    "framer-motion": "^12.34.5",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },

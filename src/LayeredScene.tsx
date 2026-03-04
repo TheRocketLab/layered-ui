@@ -47,7 +47,8 @@ export type LayeredSceneProps = {
 export type LayeredSceneRef = {
   goToPrev: () => void,
   goToNext: () => void,
-  goToFirst: () => void
+  goToFirst: () => void,
+  goToIndex: (index: number) => void
 }
 
 export const LayeredScene = forwardRef<LayeredSceneRef, LayeredSceneProps>(({
@@ -206,6 +207,7 @@ export const LayeredScene = forwardRef<LayeredSceneRef, LayeredSceneProps>(({
     goToPrev: () => goToIndex(activeIndex - 1),
     goToNext: () => goToIndex(activeIndex + 1),
     goToFirst: () => goToIndex(0),
+    goToIndex: (index: number) => goToIndex(index),
   }), [activeIndex, goToIndex])
 
   const isTransitioning = isAnimating
