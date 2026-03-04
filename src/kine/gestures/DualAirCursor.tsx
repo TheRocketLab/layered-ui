@@ -71,7 +71,7 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
   const blockUntilRef = useRef(0)
   const blockAllUntilRef = useRef(0)
   const [blockProgress, setBlockProgress] = useState(0)
-  const prevFingerStraightRef = useRef<{ index: boolean; middle: boolean } | null>(null)
+  const bothBentRef = useRef(false)
   const readyRef = useRef(false)
   const onSwipeDownRef = useRef(onSwipeDown)
   const onSwipeUpRef = useRef(onSwipeUp)
@@ -99,7 +99,7 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
       if (!landmarks || landmarks.length === 0) {
         opacitySpring.set(0)
         readyRef.current = false
-        prevFingerStraightRef.current = null
+        bothBentRef.current = false
         setActiveCursors({ left: false, right: false })
         setJointLines([])
         setFingerStatus([])
@@ -125,18 +125,6 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
       yTwoSpring.set(targetTwoY)
       opacitySpring.set(1)
 
-      const fingerDistance = Math.hypot(indexPoint.x - middlePoint.x, indexPoint.y - middlePoint.y)
-      const hasTwoFingers = fingerDistance >= minimumFingerSeparation
-      if (!hasTwoFingers) {
-        setFingerColors((prev) =>
-          prev.left === '#3b82f6' && prev.right === '#3b82f6' ? prev : { left: '#3b82f6', right: '#3b82f6' },
-        )
-        setJointLines([])
-        setActiveCursors({ left: false, right: false })
-        animationFrameId = requestAnimationFrame(loop)
-        return
-      }
-
       const statuses = fingerRegistry.map(({ name, indexes }) => ({
         name,
         straight: fingerStraight(firstHand, indexes[0], indexes[1], indexes[2], indexes[3]),
@@ -155,6 +143,16 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
       )
       const readyToSwipe = indexActive && middleActive
       setActiveCursors({ left: indexActive, right: middleActive })
+
+      const fingerDistance = Math.hypot(indexPoint.x - middlePoint.x, indexPoint.y - middlePoint.y)
+      const hasTwoFingers = fingerDistance >= minimumFingerSeparation
+      if (!hasTwoFingers) {
+        setJointLines([])
+        readyRef.current = readyToSwipe
+        animationFrameId = requestAnimationFrame(loop)
+        bothBentRef.current = false
+        return
+      }
 
       const joints: [{ x: number; y: number }, { x: number; y: number }][] = []
       const fingers = [
@@ -179,6 +177,10 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
       setJointLines(joints)
 
       const previousReady = readyRef.current
+      const wasBothBent = bothBentRef.current
+      if (!indexActive && !middleActive) {
+        bothBentRef.current = true
+      }
       if (readyToSwipe !== previousReady) {
         const now = performance.now()
         const direction: 1 | -1 = readyToSwipe ? -1 : 1
@@ -193,13 +195,10 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
               if (direction === 1) {
                 onSwipeDownRef.current?.()
                 setLastEvent('Swipe Down')
-              } else {
-                const prevStraight = prevFingerStraightRef.current
-                const wasBent = prevStraight && !prevStraight.index && !prevStraight.middle
-                if (wasBent) {
-                  onSwipeUpRef.current?.()
-                  setLastEvent('Swipe Up')
-                }
+              } else if (wasBothBent) {
+                onSwipeUpRef.current?.()
+                setLastEvent('Swipe Up')
+                bothBentRef.current = false
               }
             }
           }
