@@ -22,13 +22,7 @@ const normalized = (v: Landmark) => {
 
 const dot = (a: Landmark, b: Landmark) => a.x * b.x + a.y * b.y + a.z * b.z
 
-const nailVisible = (
-  hand: Landmark[],
-  mcpIdx: number,
-  pipIdx: number,
-  dipIdx: number,
-  tipIdx: number,
-) => {
+const fingerStraight = (hand: Landmark[], mcpIdx: number, pipIdx: number, dipIdx: number, tipIdx: number) => {
   const mcp = hand[mcpIdx]
   const pip = hand[pipIdx]
   const dip = hand[dipIdx]
@@ -38,13 +32,20 @@ const nailVisible = (
   const vecB = normalized(vector(pip, dip))
   const vecC = normalized(vector(dip, tip))
   const straightness = Math.min(dot(vecA, vecB), dot(vecB, vecC))
-  return straightness > 0.95 && tip.z < pip.z - 0.02
+  return straightness > 0.95
 }
+
+const fingerRegistry = [
+  { name: 'Thumb', indexes: [1, 2, 3, 4] },
+  { name: 'Index', indexes: [5, 6, 7, 8] },
+  { name: 'Middle', indexes: [9, 10, 11, 12] },
+  { name: 'Ring', indexes: [13, 14, 15, 16] },
+  { name: 'Pinky', indexes: [17, 18, 19, 20] },
+]
 
 interface DualAirCursorProps {
   onSwipeDown?: () => void
   onSwipeUp?: () => void
-  dualStrokeColor?: [string, string]
   verticalThreshold?: number
   minFrames?: number
   cooldownMs?: number
@@ -56,8 +57,7 @@ interface DualAirCursorProps {
 export const DualAirCursor: React.FC<DualAirCursorProps> = ({
   onSwipeDown,
   onSwipeUp,
-  dualStrokeColor = ['#10b981', '#3b82f6'],
-  verticalThreshold = 0.35,
+  verticalThreshold = 0.15,
   minFrames = 12,
   cooldownMs = 800,
   reverseBlockMs = 400,
@@ -82,6 +82,9 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
   })
   const onSwipeDownRef = useRef(onSwipeDown)
   const onSwipeUpRef = useRef(onSwipeUp)
+  const [jointLines, setJointLines] = useState<[{ x: number; y: number }, { x: number; y: number }][]>([])
+  const [fingerStatus, setFingerStatus] = useState<{ name: string; straight: boolean }[]>([])
+  const [activeCursors, setActiveCursors] = useState({ left: false, right: false })
 
   useEffect(() => {
     onSwipeDownRef.current = onSwipeDown
@@ -95,89 +98,132 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
 
     const loop = () => {
       const landmarks = landmarksRef.current
-      if (landmarks && landmarks.length > 0) {
-        const firstHand = landmarks[0]
-        let leftIndex = firstHand[8]
-        let rightIndex = firstHand[12]
-
-        if (landmarks.length >= 2) {
-          const secondHand = landmarks[1]
-          rightIndex = secondHand[8]
-        }
-
-        const windowWidth = typeof window !== 'undefined' ? window.innerWidth : 1000
-        const windowHeight = typeof window !== 'undefined' ? window.innerHeight : 1000
-
-        const targetOneX = (1 - leftIndex.x) * windowWidth
-        const targetOneY = leftIndex.y * windowHeight
-        const targetTwoX = (1 - rightIndex.x) * windowWidth
-        const targetTwoY = rightIndex.y * windowHeight
-
-        xOneSpring.set(targetOneX)
-        yOneSpring.set(targetOneY)
-        xTwoSpring.set(targetTwoX)
-        yTwoSpring.set(targetTwoY)
-        opacitySpring.set(1)
-
-        const averageY = (leftIndex.y + rightIndex.y) / 2
-        const fingerDistance = Math.hypot(leftIndex.x - rightIndex.x, leftIndex.y - rightIndex.y)
-        const hasTwoFingers = fingerDistance >= minimumFingerSeparation
-        if (!hasTwoFingers) {
-          historyRef.current = []
-        } else {
-              const history = historyRef.current
-          history.push(averageY)
-          if (history.length > minFrames) {
-            history.shift()
-          }
-          const leftNail = nailVisible(firstHand, 5, 6, 7, 8)
-          const rightHand = landmarks.length >= 2 ? landmarks[1] : firstHand
-          const rightNail = nailVisible(rightHand, 5, 6, 7, 8)
-          const nextColors = {
-            left: leftNail ? '#ffffff' : '#3b82f6',
-            right: rightNail ? '#ffffff' : '#3b82f6',
-          }
-          setFingerColors((prev) =>
-            prev.left === nextColors.left && prev.right === nextColors.right ? prev : nextColors,
-          )
-
-          const now = performance.now()
-          const blockRemaining = blockAllUntilRef.current - now
-          if (blockRemaining > 0) {
-            const progress = Math.min(Math.max(blockRemaining / blockAfterSwipeMs, 0), 1)
-            setBlockProgress((prev) => (Math.abs(prev - progress) > 0.01 ? progress : prev))
-            animationFrameId = requestAnimationFrame(loop)
-            return
-          }
-          setBlockProgress((prev) => (prev > 0 ? 0 : prev))
-
-          if (!cooldownRef.current && history.length === minFrames) {
-            const delta = history[history.length - 1] - history[0]
-            if (Math.abs(delta) > verticalThreshold) {
-              const direction: 1 | -1 = delta > 0 ? 1 : -1
-              if (blockedDirectionRef.current === direction && blockUntilRef.current > now) {
-                // still blocked after a recent reverse swipe
-              } else {
-                if (delta > 0) {
-                  onSwipeDownRef.current?.()
-                } else {
-                  onSwipeUpRef.current?.()
-                }
-              }
-              blockedDirectionRef.current = direction === 1 ? -1 : 1
-              blockUntilRef.current = now + reverseBlockMs
-              cooldownRef.current = true
-              historyRef.current = []
-              window.setTimeout(() => {
-                cooldownRef.current = false
-              }, cooldownMs)
-              blockAllUntilRef.current = now + blockAfterSwipeMs
-            }
-          }
-        }
-      } else {
+      if (!landmarks || landmarks.length === 0) {
         opacitySpring.set(0)
         historyRef.current = []
+        setActiveCursors({ left: false, right: false })
+        setJointLines([])
+        animationFrameId = requestAnimationFrame(loop)
+        return
+      }
+
+      const firstHand = landmarks[0]
+      const indexPoint = firstHand[8]
+      const middlePoint = firstHand[12]
+
+      const windowWidth = typeof window !== 'undefined' ? window.innerWidth : 1000
+      const windowHeight = typeof window !== 'undefined' ? window.innerHeight : 1000
+
+      const targetOneX = (1 - indexPoint.x) * windowWidth
+      const targetOneY = indexPoint.y * windowHeight
+      const targetTwoX = (1 - middlePoint.x) * windowWidth
+      const targetTwoY = middlePoint.y * windowHeight
+
+      xOneSpring.set(targetOneX)
+      yOneSpring.set(targetOneY)
+      xTwoSpring.set(targetTwoX)
+      yTwoSpring.set(targetTwoY)
+      opacitySpring.set(1)
+
+      const averageY = (indexPoint.y + middlePoint.y) / 2
+      const fingerDistance = Math.hypot(indexPoint.x - middlePoint.x, indexPoint.y - middlePoint.y)
+      const hasTwoFingers = fingerDistance >= minimumFingerSeparation
+      if (!hasTwoFingers) {
+        historyRef.current = []
+        setFingerColors((prev) =>
+          prev.left === '#3b82f6' && prev.right === '#3b82f6' ? prev : { left: '#3b82f6', right: '#3b82f6' },
+        )
+        setJointLines([])
+        setActiveCursors({ left: false, right: false })
+        animationFrameId = requestAnimationFrame(loop)
+        return
+      }
+
+      const statuses = fingerRegistry.map(({ name, indexes }) => ({
+        name,
+        straight: fingerStraight(firstHand, indexes[0], indexes[1], indexes[2], indexes[3]),
+      }))
+      setFingerStatus(statuses)
+      const indexStatus = statuses.find((f) => f.name === 'Index')
+      const middleStatus = statuses.find((f) => f.name === 'Middle')
+      const indexActive = Boolean(indexStatus?.straight)
+      const middleActive = Boolean(middleStatus?.straight)
+      const nextColors = {
+        left: indexActive ? '#ffffff' : '#3b82f6',
+        right: middleActive ? '#ffffff' : '#3b82f6',
+      }
+      setFingerColors((prev) =>
+        prev.left === nextColors.left && prev.right === nextColors.right ? prev : nextColors,
+      )
+      const readyToSwipe = indexActive && middleActive
+      setActiveCursors({ left: indexActive, right: middleActive })
+
+      const joints: [{ x: number; y: number }, { x: number; y: number }][] = []
+      const fingers = [
+        [0, 1, 2, 3, 4],
+        [0, 5, 6, 7, 8],
+        [0, 9, 10, 11, 12],
+        [0, 13, 14, 15, 16],
+        [0, 17, 18, 19, 20],
+      ]
+      fingers.forEach((indexes) => {
+        for (let i = 0; i < indexes.length - 1; i += 1) {
+          const from = firstHand[indexes[i]]
+          const to = firstHand[indexes[i + 1]]
+          if (from && to) {
+            joints.push([
+              { x: (1 - from.x) * windowWidth, y: from.y * windowHeight },
+              { x: (1 - to.x) * windowWidth, y: to.y * windowHeight },
+            ])
+          }
+        }
+      })
+      setJointLines(joints)
+
+      if (!readyToSwipe) {
+        historyRef.current = []
+        animationFrameId = requestAnimationFrame(loop)
+        return
+      }
+
+      const history = historyRef.current
+      history.push(averageY)
+      if (history.length > minFrames) {
+        history.shift()
+      }
+
+      const now = performance.now()
+      const blockRemaining = blockAllUntilRef.current - now
+      if (blockRemaining > 0) {
+        const progress = Math.min(Math.max(blockRemaining / blockAfterSwipeMs, 0), 1)
+        setBlockProgress((prev) => (Math.abs(prev - progress) > 0.01 ? progress : prev))
+        animationFrameId = requestAnimationFrame(loop)
+        return
+      }
+      setBlockProgress((prev) => (prev > 0 ? 0 : prev))
+
+      if (!cooldownRef.current && history.length === minFrames) {
+        const delta = history[history.length - 1] - history[0]
+        if (Math.abs(delta) > verticalThreshold) {
+          const direction: 1 | -1 = delta > 0 ? 1 : -1
+          if (blockedDirectionRef.current === direction && blockUntilRef.current > now) {
+            // still blocked after a recent reverse swipe
+          } else {
+            if (delta > 0) {
+              onSwipeDownRef.current?.()
+            } else {
+              onSwipeUpRef.current?.()
+            }
+          }
+          blockedDirectionRef.current = direction === 1 ? -1 : 1
+          blockUntilRef.current = now + reverseBlockMs
+          cooldownRef.current = true
+          historyRef.current = []
+          window.setTimeout(() => {
+            cooldownRef.current = false
+          }, cooldownMs)
+          blockAllUntilRef.current = now + blockAfterSwipeMs
+        }
       }
 
       animationFrameId = requestAnimationFrame(loop)
@@ -188,7 +234,7 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
     return () => {
       cancelAnimationFrame(animationFrameId)
     }
-  }, [cooldownMs, historyRef, isWebcamActive, landmarksRef, minFrames, opacitySpring, verticalThreshold, xOneSpring, xTwoSpring, yOneSpring, yTwoSpring, blockAfterSwipeMs])
+  }, [cooldownMs, historyRef, isWebcamActive, landmarksRef, minFrames, opacitySpring, reverseBlockMs, verticalThreshold, xOneSpring, xTwoSpring, yOneSpring, yTwoSpring, blockAfterSwipeMs])
 
   if (!isWebcamActive) return null
 
@@ -213,32 +259,86 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
   const dashOffset = circumference * (1 - cooldownRatio)
 
   const isBlocked = blockProgress > 0
+  const leftColor = fingerColors.left
+  const rightColor = fingerColors.right
   return (
     <>
-      <div style={{ opacity: isBlocked ? 0.3 : 1 }}>
-        <motion.div
-          aria-hidden
+      {activeCursors.left && (
+        <div style={{ opacity: isBlocked ? 0.3 : 1 }}>
+          <motion.div
+            aria-hidden
+            style={{
+              ...cursorStyle(leftColor),
+              x: xOneSpring,
+              y: yOneSpring,
+              opacity: opacitySpring,
+            }}
+            transition={{ duration: 0.15 }}
+          />
+        </div>
+      )}
+      {activeCursors.right && (
+        <div style={{ opacity: isBlocked ? 0.3 : 1 }}>
+          <motion.div
+            aria-hidden
+            style={{
+              ...cursorStyle(rightColor),
+              x: xTwoSpring,
+              y: yTwoSpring,
+              opacity: opacitySpring,
+            }}
+            transition={{ duration: 0.15 }}
+          />
+        </div>
+      )}
+      <svg
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          pointerEvents: 'none',
+          zIndex: 100000,
+        }}
+      >
+        {jointLines.map((joint, index) => (
+          <line
+            key={index}
+            x1={joint[0].x}
+            y1={joint[0].y}
+            x2={joint[1].x}
+            y2={joint[1].y}
+            stroke="#ffffff"
+            strokeWidth={2}
+          />
+        ))}
+      </svg>
+      {fingerStatus.length > 0 && (
+        <div
           style={{
-            ...cursorStyle(dualStrokeColor[0]),
-            x: xOneSpring,
-            y: yOneSpring,
-            opacity: opacitySpring,
+            position: 'fixed',
+            right: 16,
+            bottom: 16,
+            background: 'rgba(0,0,0,0.6)',
+            borderRadius: 12,
+            padding: '8px 12px',
+            color: '#f8fafc',
+            fontSize: 12,
+            fontFamily: 'monospace',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 4,
           }}
-          transition={{ duration: 0.15 }}
-        />
-      </div>
-      <div style={{ opacity: isBlocked ? 0.3 : 1 }}>
-        <motion.div
-          aria-hidden
-          style={{
-            ...cursorStyle(dualStrokeColor[1]),
-            x: xTwoSpring,
-            y: yTwoSpring,
-            opacity: opacitySpring,
-          }}
-          transition={{ duration: 0.15 }}
-        />
-      </div>
+        >
+          <span>Active casors: {(activeCursors.left ? 1 : 0) + (activeCursors.right ? 1 : 0)}</span>
+          {fingerStatus.map((finger) => (
+            <span key={finger.name}>
+              {finger.name}: {finger.straight ? 'straight' : 'bent'}
+            </span>
+          ))}
+        </div>
+      )}
       {blockProgress > 0 && (
         <div
           aria-hidden
