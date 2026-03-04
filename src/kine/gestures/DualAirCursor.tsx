@@ -43,6 +43,38 @@ const fingerRegistry = [
   { name: 'Pinky', indexes: [17, 18, 19, 20] },
 ]
 
+const HAND_LIMIT = 2
+const PRIMARY_FINGERS = ['index', 'middle'] as const
+const PRIMARY_FINGER_INDEXES: Record<typeof PRIMARY_FINGERS[number], number[]> = {
+  index: [5, 6, 7, 8],
+  middle: [9, 10, 11, 12],
+}
+const TIP_INDEXES: Record<typeof PRIMARY_FINGERS[number], number> = {
+  index: 8,
+  middle: 12,
+}
+const HAND_COLORS = ['#3b82f6', '#22d3ee']
+const trackedFingerKeys = Array.from({ length: HAND_LIMIT }, (_, handId) =>
+  PRIMARY_FINGERS.map((finger) => ({
+    handId,
+    finger,
+    key: `hand${handId}-${finger}`,
+  })),
+).flat()
+
+type FingerStatus = {
+  name: string
+  straight: boolean
+  undetected?: boolean
+}
+
+type HandTrackMeta = {
+  bothBent: boolean
+  ready: boolean
+  present: boolean
+  isLeft: boolean
+}
+
 interface DualAirCursorProps {
   onSwipeDown?: () => void
   onSwipeUp?: () => void
@@ -61,33 +93,31 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
   blockAfterSwipeMs = 2000,
 }) => {
   const { landmarksRef, isWebcamActive } = useKine()
-  const xOneSpring = useSpring(0, { stiffness: 1000, damping: 50 })
-  const yOneSpring = useSpring(0, { stiffness: 1000, damping: 50 })
-  const xTwoSpring = useSpring(0, { stiffness: 1000, damping: 50 })
-  const yTwoSpring = useSpring(0, { stiffness: 1000, damping: 50 })
+  const cursorSpringConfig = { stiffness: 1000, damping: 50 }
+  const cursorSprings = trackedFingerKeys.map(() => ({
+    x: useSpring(0, cursorSpringConfig),
+    y: useSpring(0, cursorSpringConfig),
+  }))
+  const cursorSpringsRef = useRef(cursorSprings)
+  cursorSpringsRef.current = cursorSprings
   const opacitySpring = useSpring(0, { stiffness: 200, damping: 50 })
   const cooldownRef = useRef(false)
   const blockedDirectionRef = useRef<1 | -1 | null>(null)
   const blockUntilRef = useRef(0)
   const blockAllUntilRef = useRef(0)
   const [blockProgress, setBlockProgress] = useState(0)
-  const bothBentRef = useRef(false)
-  const handLostRef = useRef(true)
+  const handMetaRef = useRef<HandTrackMeta[]>(
+    Array.from({ length: HAND_LIMIT }, () => ({ bothBent: false, ready: false, present: false, isLeft: false })),
+  )
+  const leftHandIdRef = useRef(-1)
   const readyRef = useRef(false)
   const onSwipeDownRef = useRef(onSwipeDown)
   const onSwipeUpRef = useRef(onSwipeUp)
-  const [fingerColors, setFingerColors] = useState({
-    left: '#3b82f6',
-    right: '#3b82f6',
-  })
   const [jointLines, setJointLines] = useState<[{ x: number; y: number }, { x: number; y: number }][]>([])
-  const [fingerStatus, setFingerStatus] = useState<{
-    name: string
-    straight: boolean
-    undetected?: boolean
-  }[]>([])
-  const [activeCursors, setActiveCursors] = useState({ left: false, right: false })
+  const [fingerStatus, setFingerStatus] = useState<FingerStatus[]>([])
+  const [activeCursorKeys, setActiveCursorKeys] = useState<string[]>([])
   const [lastEvent, setLastEvent] = useState<string>('')
+  const [handLabels, setHandLabels] = useState<{ handId: number; label: string; x: number; y: number }[]>([])
 
   useEffect(() => {
     onSwipeDownRef.current = onSwipeDown
@@ -109,64 +139,47 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
       if (!landmarks || landmarks.length === 0) {
         opacitySpring.set(0)
         readyRef.current = false
-        bothBentRef.current = false
-        handLostRef.current = true
-        setActiveCursors({ left: false, right: false })
+        handMetaRef.current = Array.from({ length: HAND_LIMIT }, () => ({ bothBent: false, ready: false, present: false, isLeft: false }))
         setJointLines([])
         setFingerStatus(undetectedFingerStatus)
+        setActiveCursorKeys([])
         animationFrameId = requestAnimationFrame(loop)
         return
       }
 
-      const firstHand = landmarks[0]
-      const indexPoint = firstHand[8]
-      const middlePoint = firstHand[12]
-
-      const justRegained = handLostRef.current
-      handLostRef.current = false
       const windowWidth = typeof window !== 'undefined' ? window.innerWidth : 1000
       const windowHeight = typeof window !== 'undefined' ? window.innerHeight : 1000
+      const primaryHandIndex = landmarks.findIndex((hand) => Boolean(hand && hand.length))
+      const primaryHand = primaryHandIndex !== -1 ? landmarks[primaryHandIndex] : null
 
-      const targetOneX = (1 - indexPoint.x) * windowWidth
-      const targetOneY = indexPoint.y * windowHeight
-      const targetTwoX = (1 - middlePoint.x) * windowWidth
-      const targetTwoY = middlePoint.y * windowHeight
+      const handCandidates = landmarks
+        .map((hand, handId) => {
+          if (!hand || hand.length === 0) return null
+          const thumbTip = hand[4]
+          if (!thumbTip) return null
+          const left = thumbTip.x > 0.5
+          return { handId, left }
+        })
+        .filter(Boolean) as { handId: number; left: boolean }[]
+      const leftCandidate = handCandidates.find((candidate) => candidate.left)
+      if (leftCandidate) {
+        leftHandIdRef.current = leftCandidate.handId
+      } else {
+        const activeHandIds = handCandidates.map((candidate) => candidate.handId)
+        if (!activeHandIds.includes(leftHandIdRef.current)) {
+          leftHandIdRef.current = -1
+        }
+      }
+      const leftHandId = leftHandIdRef.current
 
-      xOneSpring.set(targetOneX)
-      yOneSpring.set(targetOneY)
-      xTwoSpring.set(targetTwoX)
-      yTwoSpring.set(targetTwoY)
-      opacitySpring.set(1)
-
-      const statuses = fingerRegistry.map(({ name, indexes }) => ({
-        name,
-        straight: fingerStraight(firstHand, indexes[0], indexes[1], indexes[2], indexes[3]),
-        undetected: false,
-      }))
+      const statuses = primaryHand
+        ? fingerRegistry.map(({ name, indexes }) => ({
+            name,
+            straight: fingerStraight(primaryHand, indexes[0], indexes[1], indexes[2], indexes[3]),
+            undetected: false,
+          }))
+        : undetectedFingerStatus
       setFingerStatus(statuses)
-      const indexStatus = statuses.find((f) => f.name === 'Index')
-      const middleStatus = statuses.find((f) => f.name === 'Middle')
-      const indexActive = Boolean(indexStatus?.straight)
-      const middleActive = Boolean(middleStatus?.straight)
-      const nextColors = {
-        left: indexActive ? '#ffffff' : '#3b82f6',
-        right: middleActive ? '#ffffff' : '#3b82f6',
-      }
-      setFingerColors((prev) =>
-        prev.left === nextColors.left && prev.right === nextColors.right ? prev : nextColors,
-      )
-      const readyToSwipe = indexActive && middleActive
-      setActiveCursors({ left: indexActive, right: middleActive })
-
-      const fingerDistance = Math.hypot(indexPoint.x - middlePoint.x, indexPoint.y - middlePoint.y)
-      const hasTwoFingers = fingerDistance >= minimumFingerSeparation
-      if (!hasTwoFingers) {
-        setJointLines([])
-        readyRef.current = readyToSwipe
-        animationFrameId = requestAnimationFrame(loop)
-        bothBentRef.current = false
-        return
-      }
 
       const joints: [{ x: number; y: number }, { x: number; y: number }][] = []
       const fingers = [
@@ -176,25 +189,92 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
         [0, 13, 14, 15, 16],
         [0, 17, 18, 19, 20],
       ]
-      fingers.forEach((indexes) => {
-        for (let i = 0; i < indexes.length - 1; i += 1) {
-          const from = firstHand[indexes[i]]
-          const to = firstHand[indexes[i + 1]]
-          if (from && to) {
-            joints.push([
-              { x: (1 - from.x) * windowWidth, y: from.y * windowHeight },
-              { x: (1 - to.x) * windowWidth, y: to.y * windowHeight },
-            ])
+      landmarks.forEach((hand) => {
+        if (!hand) return
+        fingers.forEach((indexes) => {
+          for (let i = 0; i < indexes.length - 1; i += 1) {
+            const from = hand[indexes[i]]
+            const to = hand[indexes[i + 1]]
+            if (from && to) {
+              joints.push([
+                { x: (1 - from.x) * windowWidth, y: from.y * windowHeight },
+                { x: (1 - to.x) * windowWidth, y: to.y * windowHeight },
+              ])
+            }
           }
-        }
+        })
       })
       setJointLines(joints)
 
+      const labels = landmarks
+        .map((hand, handId) => ({ hand, handId }))
+        .filter(({ hand }) => Boolean(hand && hand.length))
+        .map(({ hand, handId }) => ({
+          handId,
+          label: handId === leftHandId ? 'LEFT' : 'RIGHT',
+          x: (1 - hand[0].x) * windowWidth,
+          y: hand[0].y * windowHeight,
+        }))
+      setHandLabels(labels)
+
+      const activeKeys: string[] = []
+      trackedFingerKeys.forEach((entry, index) => {
+        const handLandmarks = landmarks[entry.handId]
+        if (!handLandmarks) return
+        const indexes = PRIMARY_FINGER_INDEXES[entry.finger]
+        const straight = fingerStraight(handLandmarks, indexes[0], indexes[1], indexes[2], indexes[3])
+        if (!straight) return
+        const tip = handLandmarks[TIP_INDEXES[entry.finger]]
+        if (!tip) return
+        const targetX = (1 - tip.x) * windowWidth
+        const targetY = tip.y * windowHeight
+        const spring = cursorSpringsRef.current[index]
+        if (!spring) return
+        spring.x.set(targetX)
+        spring.y.set(targetY)
+        activeKeys.push(entry.key)
+      })
+      setActiveCursorKeys(activeKeys)
+      opacitySpring.set(activeKeys.length > 0 ? 1 : 0)
+
+      const prevMeta = handMetaRef.current
+      const currentMeta = prevMeta.map((meta, handId) => {
+        const handLandmarks = landmarks[handId]
+        if (!handLandmarks) {
+          return { bothBent: false, ready: false, present: false, isLeft: false }
+        }
+        const indexStraight = fingerStraight(
+          handLandmarks,
+          PRIMARY_FINGER_INDEXES.index[0],
+          PRIMARY_FINGER_INDEXES.index[1],
+          PRIMARY_FINGER_INDEXES.index[2],
+          PRIMARY_FINGER_INDEXES.index[3],
+        )
+        const middleStraight = fingerStraight(
+          handLandmarks,
+          PRIMARY_FINGER_INDEXES.middle[0],
+          PRIMARY_FINGER_INDEXES.middle[1],
+          PRIMARY_FINGER_INDEXES.middle[2],
+          PRIMARY_FINGER_INDEXES.middle[3],
+        )
+        const fingerDistance = Math.hypot(
+          handLandmarks[PRIMARY_FINGER_INDEXES.index[3]].x - handLandmarks[PRIMARY_FINGER_INDEXES.middle[3]].x,
+          handLandmarks[PRIMARY_FINGER_INDEXES.index[3]].y - handLandmarks[PRIMARY_FINGER_INDEXES.middle[3]].y,
+        )
+        const separated = fingerDistance >= minimumFingerSeparation
+        const isLeft = handId === leftHandId
+        const ready = isLeft && indexStraight && middleStraight && separated
+        const bothBent = !indexStraight && !middleStraight ? true : meta.bothBent
+        return { bothBent, ready, present: true, isLeft }
+      })
+      const handJustRegained = prevMeta.map((meta, handId) => !meta.present && currentMeta[handId].present)
+      const leftHandIndex = currentMeta.findIndex((meta) => meta.isLeft)
+      const leftHandMeta = leftHandIndex !== -1 ? currentMeta[leftHandIndex] : { bothBent: false, ready: false, present: false, isLeft: false }
+      const readyToSwipe = leftHandMeta.ready
       const previousReady = readyRef.current
-      const wasBothBent = bothBentRef.current && !justRegained
-      if (!indexActive && !middleActive && !justRegained) {
-        bothBentRef.current = true
-      }
+      const leftHandRegained = leftHandIndex !== -1 ? handJustRegained[leftHandIndex] : false
+      const wasBothBent = leftHandMeta.bothBent && !leftHandRegained
+      const readyHandIndex = leftHandIndex
       if (readyToSwipe !== previousReady) {
         const now = performance.now()
         const direction: 1 | -1 = readyToSwipe ? -1 : 1
@@ -206,13 +286,13 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
         } else {
           if (!cooldownRef.current) {
             if (blockedDirectionRef.current !== direction || blockUntilRef.current <= now) {
-              if (direction === 1) {
+              if (direction === 1 && previousReady && !leftHandRegained && leftHandMeta.bothBent) {
                 onSwipeDownRef.current?.()
                 setLastEvent('Swipe Down')
-              } else if (wasBothBent) {
+              } else if (wasBothBent && readyHandIndex !== -1) {
                 onSwipeUpRef.current?.()
                 setLastEvent('Swipe Up')
-                bothBentRef.current = false
+                currentMeta[readyHandIndex].bothBent = false
               }
             }
           }
@@ -236,6 +316,7 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
         }
       }
 
+      handMetaRef.current = currentMeta
       animationFrameId = requestAnimationFrame(loop)
     }
 
@@ -244,7 +325,10 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
     return () => {
       cancelAnimationFrame(animationFrameId)
     }
-  }, [cooldownMs, isWebcamActive, landmarksRef, opacitySpring, reverseBlockMs, xOneSpring, xTwoSpring, yOneSpring, yTwoSpring, blockAfterSwipeMs])
+  }, [cooldownMs, isWebcamActive, landmarksRef, opacitySpring, reverseBlockMs, blockAfterSwipeMs])
+
+  const activeCursorSet = useMemo(() => new Set(activeCursorKeys), [activeCursorKeys])
+  const activeCursorEntries = trackedFingerKeys.filter((entry) => activeCursorSet.has(entry.key))
 
   if (!isWebcamActive) return null
 
@@ -267,40 +351,30 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
   const indicatorRadius = 12
   const circumference = 2 * Math.PI * indicatorRadius
   const dashOffset = circumference * (1 - cooldownRatio)
-
   const isBlocked = blockProgress > 0
-  const leftColor = fingerColors.left
-  const rightColor = fingerColors.right
   return (
     <>
-      {activeCursors.left && (
-        <div style={{ opacity: isBlocked ? 0.3 : 1 }}>
-          <motion.div
-            aria-hidden
-            style={{
-              ...cursorStyle(leftColor),
-              x: xOneSpring,
-              y: yOneSpring,
-              opacity: opacitySpring,
-            }}
-            transition={{ duration: 0.15 }}
-          />
-        </div>
-      )}
-      {activeCursors.right && (
-        <div style={{ opacity: isBlocked ? 0.3 : 1 }}>
-          <motion.div
-            aria-hidden
-            style={{
-              ...cursorStyle(rightColor),
-              x: xTwoSpring,
-              y: yTwoSpring,
-              opacity: opacitySpring,
-            }}
-            transition={{ duration: 0.15 }}
-          />
-        </div>
-      )}
+      {activeCursorEntries.map((entry) => {
+        const index = trackedFingerKeys.findIndex((tracked) => tracked.key === entry.key)
+        const spring = cursorSpringsRef.current[index]
+        if (!spring) return null
+        const handId = entry.handId
+        const color = HAND_COLORS[handId % HAND_COLORS.length]
+        return (
+          <div key={entry.key} style={{ opacity: isBlocked ? 0.3 : 1 }}>
+            <motion.div
+              aria-hidden
+              style={{
+                ...cursorStyle(color),
+                x: spring.x,
+                y: spring.y,
+                opacity: opacitySpring,
+              }}
+              transition={{ duration: 0.15 }}
+            />
+          </div>
+        )
+      })}
       <svg
         style={{
           position: 'fixed',
@@ -323,6 +397,20 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
             strokeWidth={2}
           />
         ))}
+        {handLabels.map((label) => (
+          <text
+            key={label.handId}
+            x={label.x}
+            y={label.y - 12}
+            fill="rgba(248, 250, 252, 0.85)"
+            fontSize={14}
+            fontWeight={600}
+            fontFamily="'Segoe UI', system-ui"
+            textAnchor="middle"
+          >
+            {label.label}
+          </text>
+        ))}
       </svg>
       {fingerStatus.length > 0 && (
         <div
@@ -341,7 +429,9 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
             gap: 4,
           }}
         >
-          <span>Active casors: {(activeCursors.left ? 1 : 0) + (activeCursors.right ? 1 : 0)}</span>
+          <span>
+            Active cursors: {activeCursorEntries.length}
+          </span>
           <span>Last event: {lastEvent || '—'}</span>
           {fingerStatus.map((finger) => (
             <span key={finger.name}>
