@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { motion, useSpring } from 'framer-motion'
 import { useKine } from './KineProvider'
 
@@ -72,6 +72,7 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
   const blockAllUntilRef = useRef(0)
   const [blockProgress, setBlockProgress] = useState(0)
   const bothBentRef = useRef(false)
+  const handLostRef = useRef(true)
   const readyRef = useRef(false)
   const onSwipeDownRef = useRef(onSwipeDown)
   const onSwipeUpRef = useRef(onSwipeUp)
@@ -80,7 +81,11 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
     right: '#3b82f6',
   })
   const [jointLines, setJointLines] = useState<[{ x: number; y: number }, { x: number; y: number }][]>([])
-  const [fingerStatus, setFingerStatus] = useState<{ name: string; straight: boolean }[]>([])
+  const [fingerStatus, setFingerStatus] = useState<{
+    name: string
+    straight: boolean
+    undetected?: boolean
+  }[]>([])
   const [activeCursors, setActiveCursors] = useState({ left: false, right: false })
   const [lastEvent, setLastEvent] = useState<string>('')
 
@@ -88,6 +93,11 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
     onSwipeDownRef.current = onSwipeDown
     onSwipeUpRef.current = onSwipeUp
   }, [onSwipeDown, onSwipeUp])
+
+  const undetectedFingerStatus = useMemo(
+    () => fingerRegistry.map(({ name }) => ({ name, straight: false, undetected: true })),
+    [],
+  )
 
   useEffect(() => {
     if (!isWebcamActive) return undefined
@@ -100,9 +110,10 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
         opacitySpring.set(0)
         readyRef.current = false
         bothBentRef.current = false
+        handLostRef.current = true
         setActiveCursors({ left: false, right: false })
         setJointLines([])
-        setFingerStatus([])
+        setFingerStatus(undetectedFingerStatus)
         animationFrameId = requestAnimationFrame(loop)
         return
       }
@@ -111,6 +122,8 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
       const indexPoint = firstHand[8]
       const middlePoint = firstHand[12]
 
+      const justRegained = handLostRef.current
+      handLostRef.current = false
       const windowWidth = typeof window !== 'undefined' ? window.innerWidth : 1000
       const windowHeight = typeof window !== 'undefined' ? window.innerHeight : 1000
 
@@ -128,6 +141,7 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
       const statuses = fingerRegistry.map(({ name, indexes }) => ({
         name,
         straight: fingerStraight(firstHand, indexes[0], indexes[1], indexes[2], indexes[3]),
+        undetected: false,
       }))
       setFingerStatus(statuses)
       const indexStatus = statuses.find((f) => f.name === 'Index')
@@ -177,8 +191,8 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
       setJointLines(joints)
 
       const previousReady = readyRef.current
-      const wasBothBent = bothBentRef.current
-      if (!indexActive && !middleActive) {
+      const wasBothBent = bothBentRef.current && !justRegained
+      if (!indexActive && !middleActive && !justRegained) {
         bothBentRef.current = true
       }
       if (readyToSwipe !== previousReady) {
@@ -331,7 +345,8 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
           <span>Last event: {lastEvent || '—'}</span>
           {fingerStatus.map((finger) => (
             <span key={finger.name}>
-              {finger.name}: {finger.straight ? 'straight' : 'bent'}
+              {finger.name}:{' '}
+              {finger.undetected ? 'undetected' : finger.straight ? 'straight' : 'bent'}
             </span>
           ))}
         </div>
