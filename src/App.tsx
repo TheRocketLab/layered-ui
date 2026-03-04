@@ -24,6 +24,7 @@ const testPopupPlacement = {
 function App() {
   const transitionMs = 250
   const [modalOpen, setModalOpen] = useState(false)
+  const [kineEnabled, setKineEnabled] = useState(true)
   const layeredRef = useRef<LayeredSceneRef>(null)
 
   return (
@@ -48,11 +49,46 @@ function App() {
           <Layer10 onTestPopup={() => setModalOpen(true)} />
         </LayeredScene>
       </SwipeArea>
-      <DualAirCursor
-        onSwipeDown={() => layeredRef.current?.goToNext()}
-        onSwipeUp={() => layeredRef.current?.goToPrev()}
-        dualStrokeColor={['#10b981', '#3b82f6']}
-      />
+      {kineEnabled && (
+        <DualAirCursor
+          onSwipeDown={() => layeredRef.current?.goToNext()}
+          onSwipeUp={() => layeredRef.current?.goToPrev()}
+        />
+      )}
+      <div
+        style={{
+          position: 'fixed',
+          left: 16,
+          bottom: 16,
+          padding: '8px 12px',
+          borderRadius: 12,
+          background: 'rgba(15,23,42,0.9)',
+          color: '#f8fafc',
+          fontSize: 12,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          boxShadow: '0 6px 20px rgba(15,23,42,0.45)',
+        }}
+      >
+        <span style={{ fontWeight: 600 }}>Kine</span>
+        <button
+          type="button"
+          onClick={() => setKineEnabled((prev) => !prev)}
+          style={{
+            padding: '4px 10px',
+            borderRadius: 999,
+            border: 'none',
+            cursor: 'pointer',
+            background: kineEnabled ? '#22c55e' : '#64748b',
+            color: '#f8fafc',
+            fontSize: 12,
+            fontWeight: 600,
+          }}
+        >
+          {kineEnabled ? 'Enabled' : 'Disabled'}
+        </button>
+      </div>
     </>
   )
 }
