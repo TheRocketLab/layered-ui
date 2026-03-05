@@ -25,6 +25,7 @@ function App() {
   const transitionMs = 250
   const [modalOpen, setModalOpen] = useState(false)
   const [kineEnabled, setKineEnabled] = useState(true)
+  const [showCursorSkeleton, setShowCursorSkeleton] = useState(true)
   const layeredRef = useRef<LayeredSceneRef>(null)
 
   return (
@@ -53,6 +54,7 @@ function App() {
         <DualAirCursor
           onSwipeDown={() => layeredRef.current?.goToNext()}
           onSwipeUp={() => layeredRef.current?.goToPrev()}
+          showVisuals={showCursorSkeleton}
         />
       )}
       <div
@@ -87,6 +89,22 @@ function App() {
           }}
         >
           {kineEnabled ? 'Enabled' : 'Disabled'}
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowCursorSkeleton((prev) => !prev)}
+          style={{
+            padding: '4px 10px',
+            borderRadius: 999,
+            border: 'none',
+            cursor: 'pointer',
+            background: showCursorSkeleton ? '#38bdf8' : '#64748b',
+            color: '#f8fafc',
+            fontSize: 12,
+            fontWeight: 600,
+          }}
+        >
+          {showCursorSkeleton ? 'Overlay on' : 'Overlay off'}
         </button>
       </div>
     </>

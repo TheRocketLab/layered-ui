@@ -82,6 +82,7 @@ interface DualAirCursorProps {
   reverseBlockMs?: number
   minimumFingerSeparation?: number
   blockAfterSwipeMs?: number
+  showVisuals?: boolean
 }
 
 export const DualAirCursor: React.FC<DualAirCursorProps> = ({
@@ -91,6 +92,7 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
   reverseBlockMs = 400,
   minimumFingerSeparation = 0.04,
   blockAfterSwipeMs = 2000,
+  showVisuals = true,
 }) => {
   const { landmarksRef, isWebcamActive } = useKine()
   const cursorSpringConfig = { stiffness: 1000, damping: 50 }
@@ -330,7 +332,7 @@ export const DualAirCursor: React.FC<DualAirCursorProps> = ({
   const activeCursorSet = useMemo(() => new Set(activeCursorKeys), [activeCursorKeys])
   const activeCursorEntries = trackedFingerKeys.filter((entry) => activeCursorSet.has(entry.key))
 
-  if (!isWebcamActive) return null
+  if (!isWebcamActive || !showVisuals) return null
 
   const cursorStyle = (color: string) => ({
     position: 'fixed' as const,
