@@ -30,6 +30,7 @@
   "scripts": {
     "dev": "vite",
     "build": "npm run build:lib",
+    "prepare": "npm run build:lib",
     "build:lib": "tsc -b && vite build --config vite.lib.config.ts && tsc --project tsconfig.lib.json",
     "build:site": "vite build",
     "lint": "eslint .",
