@@ -1,0 +1,1 @@
+{"version":3,"file":"AirCursor.d.ts","sourceRoot":"","sources":["../../../src/kine/gestures/AirCursor.tsx"],"names":[],"mappings":"AAEA,OAAO,KAAsC,MAAM,OAAO,CAAA;AAI1D,UAAU,cAAc;IACtB,mBAAmB,CAAC,EAAE,MAAM,CAAA;IAC5B,WAAW,CAAC,EAAE,MAAM,CAAA;IACpB,SAAS,CAAC,EAAE,MAAM,CAAA;IAClB,OAAO,CAAC,EAAE,OAAO,CAAA;CAClB;AAED,eAAO,MAAM,SAAS,EAAE,KAAK,CAAC,EAAE,CAAC,cAAc,CAiG9C,CAAA"}
