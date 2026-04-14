@@ -5,7 +5,7 @@ interface Layer04Props {
   onTestPopup?: () => void
 }
 
-export function Layer04({ onTestPopup }: Layer04Props) {
+export function Layer04({ onTestPopup: _onTestPopup }: Layer04Props) {
   return (
   <Layer>
           <HorizontalStack gap={28} className="layerSlideStack">
