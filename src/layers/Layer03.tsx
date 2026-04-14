@@ -4,7 +4,7 @@ interface Layer03Props {
   onTestPopup?: () => void
 }
 
-export function Layer03({ onTestPopup: _onTestPopup }: Layer03Props) {
+export function Layer03({}: Layer03Props) {
   return (
   <Layer>
           <div className="layerPanel">
