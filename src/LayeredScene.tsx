@@ -47,7 +47,8 @@ export type LayeredSceneProps = {
 export type LayeredSceneRef = {
   goToPrev: () => void,
   goToNext: () => void,
-  goToFirst: () => void
+  goToFirst: () => void,
+  goToIndex: (index: number) => void
 }
 
 export const LayeredScene = forwardRef<LayeredSceneRef, LayeredSceneProps>(({
@@ -94,6 +95,11 @@ export const LayeredScene = forwardRef<LayeredSceneRef, LayeredSceneProps>(({
   const [modalPhase, setModalPhase] = useState<'closed' | 'opening' | 'open' | 'closing'>('closed')
   const [modalAnimating, setModalAnimating] = useState(false)
   const [blurPx, setBlurPx] = useState<string>('0px')
+
+  const [viewportSize, setViewportSize] = useState(() => ({
+    width: typeof window !== 'undefined' ? window.innerWidth : 0,
+    height: typeof window !== 'undefined' ? window.innerHeight : 0,
+  }))
 
   const timeoutRef = useRef<number | null>(null)
   const rafRef = useRef<number | null>(null)
@@ -223,6 +229,7 @@ export const LayeredScene = forwardRef<LayeredSceneRef, LayeredSceneProps>(({
     goToPrev: () => goToIndex(activeIndex - 1),
     goToNext: () => goToIndex(activeIndex + 1),
     goToFirst: () => goToIndex(0),
+    goToIndex: (index: number) => goToIndex(index),
   }), [activeIndex, goToIndex])
 
   const isTransitioning = isAnimating
@@ -241,6 +248,71 @@ export const LayeredScene = forwardRef<LayeredSceneRef, LayeredSceneProps>(({
     return (phase === 'opening' || phase === 'closing') ? originTransform : ''
   }
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const handleResize = () => {
+      setViewportSize({ width: window.innerWidth, height: window.innerHeight })
+    }
+    handleResize()
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
+
+  const viewportAwarePlacement = useMemo(() => {
+    const fallback: ModalPlacement = {
+      top: '5vh',
+      left: '5vw',
+      width: '90vw',
+      height: '90vh',
+    }
+    if (!modalPlacement) return undefined
+    if (viewportSize.width === 0 || viewportSize.height === 0) return modalPlacement
+
+    const parseToPixels = (value: number | string | undefined, axisSize: number) => {
+      if (value === undefined) return null
+      if (typeof value === 'number') return value
+      const normalized = value.trim()
+      if (normalized.endsWith('px')) return parseFloat(normalized)
+      if (normalized.endsWith('vw')) return (parseFloat(normalized) / 100) * viewportSize.width
+      if (normalized.endsWith('vh')) return (parseFloat(normalized) / 100) * viewportSize.height
+      if (normalized.endsWith('%')) return (parseFloat(normalized) / 100) * axisSize
+      const asNumber = parseFloat(normalized)
+      return Number.isFinite(asNumber) ? asNumber : null
+    }
+
+    const vWidth = viewportSize.width
+    const vHeight = viewportSize.height
+    const topPx = parseToPixels(modalPlacement.top, vHeight)
+    const leftPx = parseToPixels(modalPlacement.left, vWidth)
+    const widthPx = parseToPixels(modalPlacement.width, vWidth)
+    const heightPx = parseToPixels(modalPlacement.height, vHeight)
+
+    const hasAllCoords = [topPx, leftPx, widthPx, heightPx].every((value) => typeof value === 'number')
+    if (!hasAllCoords) {
+      return modalPlacement
+    }
+
+    const widthLimitPx = vWidth * 0.9
+    let sanitizedPlacement: ModalPlacement = modalPlacement
+    let sanitizedWidthPx = widthPx!
+    if (widthPx! > widthLimitPx) {
+      sanitizedPlacement = { ...modalPlacement, width: '90vw' }
+      sanitizedWidthPx = widthLimitPx
+    }
+
+    const outOfBounds =
+      topPx! < 0 ||
+      leftPx! < 0 ||
+      sanitizedWidthPx <= 0 ||
+      heightPx! <= 0 ||
+      topPx! + heightPx! > vHeight ||
+      leftPx! + sanitizedWidthPx > vWidth
+
+    return outOfBounds ? fallback : sanitizedPlacement
+  }, [modalPlacement, viewportSize])
+
+  const activeModalPlacement = viewportAwarePlacement ?? modalPlacement
+
   const getModalPlacementStyle = (placement?: ModalPlacement): CSSProperties | undefined => {
     if (!placement) return undefined
     const style: CSSProperties = {}
@@ -251,7 +323,7 @@ export const LayeredScene = forwardRef<LayeredSceneRef, LayeredSceneProps>(({
     return style
   }
 
-  const modalPlacementStyle = getModalPlacementStyle(modalPlacement)
+  const modalPlacementStyle = getModalPlacementStyle(activeModalPlacement)
   const hasCustomPlacement = Boolean(modalPlacement)
   const baseModalPositionStyle: CSSProperties = hasCustomPlacement
     ? { transform: 'none' }
