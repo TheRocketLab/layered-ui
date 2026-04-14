@@ -203,6 +203,28 @@ export const LayeredScene = forwardRef<LayeredSceneRef, LayeredSceneProps>(({
     }
   }, [modalOpen, onModalClose])
 
+  useEffect(() => {
+    if (disableNavigationButtons) return
+
+    const handleNavigationKeyDown = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+
+      if (event.key === 'ArrowUp' || event.key === 'PageUp') {
+        event.preventDefault()
+        goToIndex(activeIndex - 1)
+      } else if (event.key === 'ArrowDown' || event.key === 'PageDown') {
+        event.preventDefault()
+        goToIndex(activeIndex + 1)
+      }
+    }
+
+    window.addEventListener('keydown', handleNavigationKeyDown)
+
+    return () => {
+      window.removeEventListener('keydown', handleNavigationKeyDown)
+    }
+  }, [disableNavigationButtons, goToIndex, activeIndex])
+
   useImperativeHandle(ref, () => ({
     goToPrev: () => goToIndex(activeIndex - 1),
     goToNext: () => goToIndex(activeIndex + 1),
